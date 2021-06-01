@@ -1,10 +1,13 @@
 #include <avr/wdt.h>
 #include <avr/sleep.h>
-#include <RadioLib.h>
+//#include <RadioLib.h>
 #include "I2C_AHT10.h"
 #include <Wire.h>
+#include <SPI.h>
+#include <LoRa.h>
+#include <ArduinoJson.h>
 
-#define NODENAME "Soil2"
+#define NODENAME "Soil_01"
 
 #define DIO0 2
 #define DIO1 6
@@ -14,9 +17,15 @@
 #define LORA_RST 4
 #define LORA_CS 10
 
+#define SS      10   // GPIO18 -- SX1278's CS
+#define RST     4   // GPIO14 -- SX1278's RESET
+#define DI0     2   // GPIO26 -- SX1278's IRQ(Interrupt Request)
+#define BAND  915E6
+
 #define SPI_MOSI 11
 #define SPI_MISO 12
 #define SPI_SCK 13
+//#define SPI_SS 10
 
 int ledPin = 13;
 int shu = 0;
@@ -27,9 +36,11 @@ int sensorValue = 0;     // variable to store the value coming from the sensor
 int16_t packetnum = 0;   // packet counter, we increment per xmission
 float temperature = 0.0; //
 float humidity = 0.0;
+//float dewpoint = 0.0;
 String errcode = "";
 
-SX1278 radio = new Module(LORA_CS, DIO0, LORA_RST, DIO1, SPI, SPISettings());
+
+// SX1278 radio = new Module(LORA_CS, DIO0, LORA_RST, DIO1, SPI, SPISettings());
 AHT10 humiditySensor;
 
 ISR(WDT_vect)
@@ -55,21 +66,22 @@ void setup()
     delay(100);
 
     // initialize SX1278 with default settings
-    Serial.println(String("[SX1278]Sensor name is :") + String(NODENAME));
-    Serial.print(F("[SX1278] Initializing ... "));
-    int state = radio.begin();
-    if (state == ERR_NONE)
-    {
-        Serial.println(F("success!"));
+    Serial.println(String("Sensor name is :") + String(NODENAME));
+    Serial.print(F("Initializing ... "));
+    SPI.begin();
+    LoRa.setPins(SS,RST,DI0);
+    if (!LoRa.begin(915E6)) {
+      Serial.println("Starting LoRa failed!");
+      while (1);
     }
-    else
-    {
-        Serial.print(F("failed, code "));
-        Serial.println(state);
-        while (true)
-            ;
-    }
-    radio.sleep();
+//    else
+//    {
+//        Serial.print(Success!));
+//        Serial.println("LoRa ok");
+//        while (0)
+//            ;
+//    }
+    LoRa.sleep();
 
     //AHT10
     pinMode(sensorPowerCtrlPin, OUTPUT);
@@ -156,9 +168,38 @@ void read_sensor()
     digitalWrite(sensorPowerCtrlPin, LOW); //Sensor power on
 
     String lora_msg = "#" + (String)packetnum +" NAME:" + (String)NODENAME + " H:" + (String)humidity + "% T:" + (String)temperature + " C" + " ADC:" + (String)sensorValue;
+
+StaticJsonBuffer<200> jsonBuffer;
+
+JsonObject& root = jsonBuffer.createObject();
+//root["id"] = "LoRaADC";
+root["name"] = NODENAME;
+//root["model"] = "LSMS092D";
+root["tempc"] = temperature;
+root["hum"] = humidity;
+//root[" Dew Point"] = dewpoint;
+root["adc"] = sensorValue;
+//root["topic"] = "omg/LSMS092D/"NODENAME;
+
+//JsonArray& data = root.createNestedArray("data");
+//data.add(temperature,6);  // 6 is the number of decimals to print
+//data.add(humidity);   // if not specified, 2 digits are printed
+
+//root.printTo(Serial);
+//root.printTo(LoRa);
+// This prints:
+// {"sensor":"gps","time":1351824120,"data":[48.756080,2.302038]}
+    
     Serial.println(lora_msg);
     packetnum++;
-    radio.transmit(lora_msg);
+    LoRa.beginPacket();
+//    LoRa.print("test");
+    root.printTo(LoRa);
+//    LoRa.print(temperature);
+//    LoRa.print(humidity);
+//    LoRa.print((String)sensorValue);
+    LoRa.endPacket();
+//    radio.transmit(lora_msg);
     delay(1000);
-    radio.sleep();
+    LoRa.sleep();
 }
